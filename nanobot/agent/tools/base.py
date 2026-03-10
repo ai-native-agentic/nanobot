@@ -137,30 +137,50 @@ class Tool(ABC):
 
     def _validate(self, val: Any, schema: dict[str, Any], path: str) -> list[str]:
         t, label = schema.get("type"), path or "parameter"
+        type_error = self._validate_type(val, t, label)
+        if type_error:
+            return type_error
+
+        errors: list[str] = []
+        if "enum" in schema and val not in schema["enum"]:
+            errors.append(f"{label} must be one of {schema['enum']}")
+        errors.extend(self._validate_constraints(val, t, schema, label))
+        errors.extend(self._validate_children(val, t, schema, path))
+        return errors
+
+    def _validate_type(self, val: Any, t: str | None, label: str) -> list[str]:
+        """Check that val matches the expected JSON Schema type. Returns errors or empty list."""
         if t == "integer" and (not isinstance(val, int) or isinstance(val, bool)):
             return [f"{label} should be integer"]
         if t == "number" and (not isinstance(val, self._TYPE_MAP[t]) or isinstance(val, bool)):
             return [f"{label} should be number"]
-        if (
-            t in self._TYPE_MAP
-            and t not in ("integer", "number")
-            and not isinstance(val, self._TYPE_MAP[t])
-        ):
-            return [f"{label} should be {t}"]
+        if t in self._TYPE_MAP and t not in ("integer", "number"):
+            if not isinstance(val, self._TYPE_MAP[t]):
+                return [f"{label} should be {t}"]
+        return []
 
-        errors = []
-        if "enum" in schema and val not in schema["enum"]:
-            errors.append(f"{label} must be one of {schema['enum']}")
+    def _validate_constraints(
+        self, val: Any, t: str | None, schema: dict[str, Any], label: str
+    ) -> list[str]:
+        """Validate numeric range and string length constraints."""
+        errors: list[str] = []
         if t in ("integer", "number"):
             if "minimum" in schema and val < schema["minimum"]:
                 errors.append(f"{label} must be >= {schema['minimum']}")
             if "maximum" in schema and val > schema["maximum"]:
                 errors.append(f"{label} must be <= {schema['maximum']}")
-        if t == "string":
+        elif t == "string":
             if "minLength" in schema and len(val) < schema["minLength"]:
                 errors.append(f"{label} must be at least {schema['minLength']} chars")
             if "maxLength" in schema and len(val) > schema["maxLength"]:
                 errors.append(f"{label} must be at most {schema['maxLength']} chars")
+        return errors
+
+    def _validate_children(
+        self, val: Any, t: str | None, schema: dict[str, Any], path: str
+    ) -> list[str]:
+        """Recursively validate object properties and array items."""
+        errors: list[str] = []
         if t == "object":
             props = schema.get("properties", {})
             for k in schema.get("required", []):
@@ -169,7 +189,7 @@ class Tool(ABC):
             for k, v in val.items():
                 if k in props:
                     errors.extend(self._validate(v, props[k], path + "." + k if path else k))
-        if t == "array" and "items" in schema:
+        elif t == "array" and "items" in schema:
             for i, item in enumerate(val):
                 errors.extend(
                     self._validate(item, schema["items"], f"{path}[{i}]" if path else f"[{i}]")
