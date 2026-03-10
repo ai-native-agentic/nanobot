@@ -255,9 +255,9 @@ class CronService:
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
 
         try:
-            response = None
+            _response = None
             if self.on_job:
-                response = await self.on_job(job)
+                _response = await self.on_job(job)
 
             job.state.last_status = "ok"
             job.state.last_error = None

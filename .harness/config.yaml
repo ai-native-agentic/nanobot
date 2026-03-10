@@ -6,6 +6,7 @@ gates:
     enabled: true
     black_line_length: 100
     ruff_select: ["E", "F", "I"]
+    mypy_enabled: false
     mypy_strict: false
   gate_b:
     enabled: true

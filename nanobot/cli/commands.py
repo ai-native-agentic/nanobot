@@ -289,46 +289,15 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
 
 
 # ============================================================================
-# Gateway / Server
+# Gateway / Server — helpers
 # ============================================================================
 
 
-@app.command()
-def gateway(
-    port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-):
-    """Start the nanobot gateway."""
+def _create_gateway_agent(config, bus, provider, cron, session_manager):
+    """Instantiate the AgentLoop with full gateway configuration."""
     from nanobot.agent.loop import AgentLoop
-    from nanobot.bus.queue import MessageBus
-    from nanobot.channels.manager import ChannelManager
-    from nanobot.config.paths import get_cron_dir
-    from nanobot.cron.service import CronService
-    from nanobot.cron.types import CronJob
-    from nanobot.heartbeat.service import HeartbeatService
-    from nanobot.session.manager import SessionManager
 
-    if verbose:
-        import logging
-
-        logging.basicConfig(level=logging.DEBUG)
-
-    config = _load_runtime_config(config, workspace)
-
-    console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    sync_workspace_templates(config.workspace_path)
-    bus = MessageBus()
-    provider = _make_provider(config)
-    session_manager = SessionManager(config.workspace_path)
-
-    # Create cron service first (callback set after agent creation)
-    cron_store_path = get_cron_dir() / "jobs.json"
-    cron = CronService(cron_store_path)
-
-    # Create agent with cron service
-    agent = AgentLoop(
+    return AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
@@ -348,9 +317,11 @@ def gateway(
         channels_config=config.channels,
     )
 
-    # Set cron callback (needs agent)
-    async def on_cron_job(job: CronJob) -> str | None:
-        """Execute a cron job through the agent."""
+
+def _make_cron_callback(agent, bus, cron):
+    """Build the async cron-job callback that executes jobs through the agent."""
+
+    async def on_cron_job(job) -> str | None:
         from nanobot.agent.tools.cron import CronTool
         from nanobot.agent.tools.message import MessageTool
 
@@ -360,7 +331,6 @@ def gateway(
             f"Scheduled instruction: {job.payload.message}"
         )
 
-        # Prevent the agent from scheduling new cron jobs during execution
         cron_tool = agent.tools.get("cron")
         cron_token = None
         if isinstance(cron_tool, CronTool):
@@ -385,20 +355,22 @@ def gateway(
 
             await bus.publish_outbound(
                 OutboundMessage(
-                    channel=job.payload.channel or "cli", chat_id=job.payload.to, content=response
+                    channel=job.payload.channel or "cli",
+                    chat_id=job.payload.to,
+                    content=response,
                 )
             )
         return response
 
-    cron.on_job = on_cron_job
+    return on_cron_job
 
-    # Create channel manager
-    channels = ChannelManager(config, bus)
+
+def _make_heartbeat_service(config, provider, agent, bus, channels, session_manager):
+    """Create and configure the HeartbeatService with routing callbacks."""
+    from nanobot.heartbeat.service import HeartbeatService
 
     def _pick_heartbeat_target() -> tuple[str, str]:
-        """Pick a routable channel/chat target for heartbeat-triggered messages."""
         enabled = set(channels.enabled_channels)
-        # Prefer the most recently updated non-internal session on an enabled channel.
         for item in session_manager.list_sessions():
             key = item.get("key") or ""
             if ":" not in key:
@@ -408,12 +380,9 @@ def gateway(
                 continue
             if channel in enabled and chat_id:
                 return channel, chat_id
-        # Fallback keeps prior behavior but remains explicit.
         return "cli", "direct"
 
-    # Create heartbeat service
     async def on_heartbeat_execute(tasks: str) -> str:
-        """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
 
         async def _silent(*_args, **_kwargs):
@@ -428,18 +397,17 @@ def gateway(
         )
 
     async def on_heartbeat_notify(response: str) -> None:
-        """Deliver a heartbeat response to the user's channel."""
         from nanobot.bus.events import OutboundMessage
 
         channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
-            return  # No external channel available to deliver to
+            return
         await bus.publish_outbound(
             OutboundMessage(channel=channel, chat_id=chat_id, content=response)
         )
 
     hb_cfg = config.gateway.heartbeat
-    heartbeat = HeartbeatService(
+    return HeartbeatService(
         workspace=config.workspace_path,
         provider=provider,
         model=agent.model,
@@ -448,6 +416,55 @@ def gateway(
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
     )
+
+
+# ============================================================================
+# Gateway / Server
+# ============================================================================
+
+
+@app.command()
+def gateway(
+    port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Start the nanobot gateway."""
+    from nanobot.bus.queue import MessageBus
+    from nanobot.channels.manager import ChannelManager
+    from nanobot.config.paths import get_cron_dir
+    from nanobot.cron.service import CronService
+    from nanobot.session.manager import SessionManager
+
+    if verbose:
+        import logging
+
+        logging.basicConfig(level=logging.DEBUG)
+
+    config = _load_runtime_config(config, workspace)
+
+    console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
+    sync_workspace_templates(config.workspace_path)
+    bus = MessageBus()
+    provider = _make_provider(config)
+    session_manager = SessionManager(config.workspace_path)
+
+    # Create cron service first (callback set after agent creation)
+    cron_store_path = get_cron_dir() / "jobs.json"
+    cron = CronService(cron_store_path)
+
+    # Create agent with cron service
+    agent = _create_gateway_agent(config, bus, provider, cron, session_manager)
+
+    # Set cron callback (needs agent)
+    cron.on_job = _make_cron_callback(agent, bus, cron)
+
+    # Create channel manager
+    channels = ChannelManager(config, bus)
+
+    # Create heartbeat service
+    heartbeat = _make_heartbeat_service(config, provider, agent, bus, channels, session_manager)
 
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
@@ -458,7 +475,7 @@ def gateway(
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
 
-    console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+    console.print(f"[green]✓[/green] Heartbeat: every {config.gateway.heartbeat.interval_s}s")
 
     async def run():
         try:
@@ -478,6 +495,133 @@ def gateway(
             await channels.stop_all()
 
     asyncio.run(run())
+
+
+# ============================================================================
+# Agent Commands — helpers
+# ============================================================================
+
+
+def _run_single_message(agent_loop, message, session_id, markdown, thinking_ctx, cli_progress):
+    """Run a single message through the agent and print the response."""
+
+    async def run_once():
+        with thinking_ctx():
+            response = await agent_loop.process_direct(
+                message, session_id, on_progress=cli_progress
+            )
+        _print_agent_response(response, render_markdown=markdown)
+        await agent_loop.close_mcp()
+
+    asyncio.run(run_once())
+
+
+def _run_interactive_session(agent_loop, bus, session_id, markdown, logs, thinking_ctx):
+    """Run an interactive chat session with the agent."""
+    from nanobot.bus.events import InboundMessage
+
+    _init_prompt_session()
+    console.print(
+        f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n"
+    )
+
+    if ":" in session_id:
+        cli_channel, cli_chat_id = session_id.split(":", 1)
+    else:
+        cli_channel, cli_chat_id = "cli", session_id
+
+    def _handle_signal(signum, frame):
+        sig_name = signal.Signals(signum).name
+        _restore_terminal()
+        console.print(f"\nReceived {sig_name}, goodbye!")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, _handle_signal)
+    if hasattr(signal, "SIGPIPE"):
+        signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+
+    async def run_interactive():
+        bus_task = asyncio.create_task(agent_loop.run())
+        turn_done = asyncio.Event()
+        turn_done.set()
+        turn_response: list[str] = []
+
+        async def _consume_outbound():
+            while True:
+                try:
+                    msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+                    if msg.metadata.get("_progress"):
+                        is_tool_hint = msg.metadata.get("_tool_hint", False)
+                        ch = agent_loop.channels_config
+                        if ch and is_tool_hint and not ch.send_tool_hints:
+                            pass
+                        elif ch and not is_tool_hint and not ch.send_progress:
+                            pass
+                        else:
+                            console.print(f"  [dim]↳ {msg.content}[/dim]")
+                    elif not turn_done.is_set():
+                        if msg.content:
+                            turn_response.append(msg.content)
+                        turn_done.set()
+                    elif msg.content:
+                        console.print()
+                        _print_agent_response(msg.content, render_markdown=markdown)
+                except asyncio.TimeoutError:
+                    continue
+                except asyncio.CancelledError:
+                    break
+
+        outbound_task = asyncio.create_task(_consume_outbound())
+
+        try:
+            while True:
+                try:
+                    _flush_pending_tty_input()
+                    user_input = await _read_interactive_input_async()
+                    command = user_input.strip()
+                    if not command:
+                        continue
+
+                    if _is_exit_command(command):
+                        _restore_terminal()
+                        console.print("\nGoodbye!")
+                        break
+
+                    turn_done.clear()
+                    turn_response.clear()
+
+                    await bus.publish_inbound(
+                        InboundMessage(
+                            channel=cli_channel,
+                            sender_id="user",
+                            chat_id=cli_chat_id,
+                            content=user_input,
+                        )
+                    )
+
+                    with thinking_ctx():
+                        await turn_done.wait()
+
+                    if turn_response:
+                        _print_agent_response(turn_response[0], render_markdown=markdown)
+                except KeyboardInterrupt:
+                    _restore_terminal()
+                    console.print("\nGoodbye!")
+                    break
+                except EOFError:
+                    _restore_terminal()
+                    console.print("\nGoodbye!")
+                    break
+        finally:
+            agent_loop.stop()
+            outbound_task.cancel()
+            await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
+            await agent_loop.close_mcp()
+
+    asyncio.run(run_interactive())
 
 
 # ============================================================================
@@ -504,7 +648,7 @@ def agent(
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.config.paths import get_cron_dir
-    from nanobot.cron.service import CronService
+    from nanobot.cron.service import CronService  # noqa: F811
 
     config = _load_runtime_config(config, workspace)
     sync_workspace_templates(config.workspace_path)
@@ -558,125 +702,16 @@ def agent(
         console.print(f"  [dim]↳ {content}[/dim]")
 
     if message:
-        # Single message mode — direct call, no bus needed
-        async def run_once():
-            with _thinking_ctx():
-                response = await agent_loop.process_direct(
-                    message, session_id, on_progress=_cli_progress
-                )
-            _print_agent_response(response, render_markdown=markdown)
-            await agent_loop.close_mcp()
-
-        asyncio.run(run_once())
+        _run_single_message(agent_loop, message, session_id, markdown, _thinking_ctx, _cli_progress)
     else:
-        # Interactive mode — route through bus like other channels
-        from nanobot.bus.events import InboundMessage
-
-        _init_prompt_session()
-        console.print(
-            f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n"
+        _run_interactive_session(
+            agent_loop,
+            bus,
+            session_id,
+            markdown,
+            logs,
+            _thinking_ctx,
         )
-
-        if ":" in session_id:
-            cli_channel, cli_chat_id = session_id.split(":", 1)
-        else:
-            cli_channel, cli_chat_id = "cli", session_id
-
-        def _handle_signal(signum, frame):
-            sig_name = signal.Signals(signum).name
-            _restore_terminal()
-            console.print(f"\nReceived {sig_name}, goodbye!")
-            sys.exit(0)
-
-        signal.signal(signal.SIGINT, _handle_signal)
-        signal.signal(signal.SIGTERM, _handle_signal)
-        # SIGHUP is not available on Windows
-        if hasattr(signal, "SIGHUP"):
-            signal.signal(signal.SIGHUP, _handle_signal)
-        # Ignore SIGPIPE to prevent silent process termination when writing to closed pipes
-        # SIGPIPE is not available on Windows
-        if hasattr(signal, "SIGPIPE"):
-            signal.signal(signal.SIGPIPE, signal.SIG_IGN)
-
-        async def run_interactive():
-            bus_task = asyncio.create_task(agent_loop.run())
-            turn_done = asyncio.Event()
-            turn_done.set()
-            turn_response: list[str] = []
-
-            async def _consume_outbound():
-                while True:
-                    try:
-                        msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
-                        if msg.metadata.get("_progress"):
-                            is_tool_hint = msg.metadata.get("_tool_hint", False)
-                            ch = agent_loop.channels_config
-                            if ch and is_tool_hint and not ch.send_tool_hints:
-                                pass
-                            elif ch and not is_tool_hint and not ch.send_progress:
-                                pass
-                            else:
-                                console.print(f"  [dim]↳ {msg.content}[/dim]")
-                        elif not turn_done.is_set():
-                            if msg.content:
-                                turn_response.append(msg.content)
-                            turn_done.set()
-                        elif msg.content:
-                            console.print()
-                            _print_agent_response(msg.content, render_markdown=markdown)
-                    except asyncio.TimeoutError:
-                        continue
-                    except asyncio.CancelledError:
-                        break
-
-            outbound_task = asyncio.create_task(_consume_outbound())
-
-            try:
-                while True:
-                    try:
-                        _flush_pending_tty_input()
-                        user_input = await _read_interactive_input_async()
-                        command = user_input.strip()
-                        if not command:
-                            continue
-
-                        if _is_exit_command(command):
-                            _restore_terminal()
-                            console.print("\nGoodbye!")
-                            break
-
-                        turn_done.clear()
-                        turn_response.clear()
-
-                        await bus.publish_inbound(
-                            InboundMessage(
-                                channel=cli_channel,
-                                sender_id="user",
-                                chat_id=cli_chat_id,
-                                content=user_input,
-                            )
-                        )
-
-                        with _thinking_ctx():
-                            await turn_done.wait()
-
-                        if turn_response:
-                            _print_agent_response(turn_response[0], render_markdown=markdown)
-                    except KeyboardInterrupt:
-                        _restore_terminal()
-                        console.print("\nGoodbye!")
-                        break
-                    except EOFError:
-                        _restore_terminal()
-                        console.print("\nGoodbye!")
-                        break
-            finally:
-                agent_loop.stop()
-                outbound_task.cancel()
-                await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
-                await agent_loop.close_mcp()
-
-        asyncio.run(run_interactive())
 
 
 # ============================================================================
