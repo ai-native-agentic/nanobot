@@ -1,0 +1,30 @@
+project_name: "nanobot"
+include_paths:
+  - "nanobot"
+gates:
+  gate_a:
+    enabled: true
+    black_line_length: 100
+    ruff_select: ["E", "F", "I"]
+    mypy_strict: false
+  gate_b:
+    enabled: true
+    root_package: "nanobot"
+    boundaries: []
+  gate_c:
+    enabled: true
+    max_function_length: 130
+    max_complexity: 23
+  gate_d:
+    enabled: false
+  gate_e:
+    enabled: false
+  gate_f:
+    enabled: false
+exclude_paths:
+  - "tests/"
+  - "venv/"
+  - ".venv/"
+  - "__pycache__/"
+  - ".pytest_cache/"
+  - ".git/"
