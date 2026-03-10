@@ -44,6 +44,17 @@ Stack: Python 3.11+, MCP, asyncio, SSE streaming
 | Channel adapters | `channels/` | Telegram, Slack, Discord, Feishu, etc. |
 | Config schema | `nanobot/config/schema.py` | YAML validation |
 | Event bus | `nanobot/bus/events.py` | Inter-component messaging |
+| SeedbotChannel | `channels/seedbot.py` | Subprocess bridge to seedbot (Bash Codex agent) |
+
+## CHANNELS
+
+### SeedbotChannel
+Subprocess stdin/stdout bridge to seedbot (Bash Codex agent).
+- File: `channels/seedbot.py`
+- Config: `channels.seedbot.enabled`, `script_path`, `working_dir`, `allow_from`
+- Protocol: writes to stdin, reads stdout until `<<<SEEDBOT_DONE>>>` marker
+- Delivery: via MessageBus (same ACL as other channels)
+- Test: `tests/test_seedbot_channel.py` (7 tests)
 
 ## CONVENTIONS
 
@@ -121,6 +132,21 @@ pytest tests/
 # Create workspace from template
 nanobot workspace create --template memory
 ```
+
+## HARNESS STATUS
+
+Entry: `.harness/run-gates.sh` (no `justfile` yet)
+
+| Gate | Tool | Status |
+|------|------|--------|
+| A | black (line-length=100) | ✅ (41 files reformatted) |
+| B | ruff lint | ✅ |
+| C | lizard complexity (max=23) | ✅ (post-refactor) |
+| D | mypy | ✅ |
+| E | pytest | ✅ |
+| F | integration tests | disabled |
+
+Work chunks committed: `docs/chunks/001` through `docs/chunks/004`
 
 ## NOTES
 
