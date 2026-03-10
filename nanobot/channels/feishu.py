@@ -91,77 +91,141 @@ def _extract_interactive_content(content: dict) -> list[str]:
     return parts
 
 
+def _extract_markdown(element: dict) -> list[str]:
+    content = element.get("content", "")
+    return [content] if content else []
+
+
+def _extract_div(element: dict) -> list[str]:
+    parts: list[str] = []
+    text = element.get("text", {})
+    if isinstance(text, dict):
+        text_content = text.get("content", "") or text.get("text", "")
+        if text_content:
+            parts.append(text_content)
+    elif isinstance(text, str):
+        parts.append(text)
+    for field in element.get("fields", []):
+        if isinstance(field, dict):
+            field_text = field.get("text", {})
+            if isinstance(field_text, dict):
+                c = field_text.get("content", "")
+                if c:
+                    parts.append(c)
+    return parts
+
+
+def _extract_link(element: dict) -> list[str]:
+    parts: list[str] = []
+    href = element.get("href", "")
+    text = element.get("text", "")
+    if href:
+        parts.append(f"link: {href}")
+    if text:
+        parts.append(text)
+    return parts
+
+
+def _extract_button(element: dict) -> list[str]:
+    parts: list[str] = []
+    text = element.get("text", {})
+    if isinstance(text, dict):
+        c = text.get("content", "")
+        if c:
+            parts.append(c)
+    url = element.get("url", "") or element.get("multi_url", {}).get("url", "")
+    if url:
+        parts.append(f"link: {url}")
+    return parts
+
+
+def _extract_img(element: dict) -> list[str]:
+    alt = element.get("alt", {})
+    return [alt.get("content", "[image]") if isinstance(alt, dict) else "[image]"]
+
+
+def _extract_nested_elements(element: dict) -> list[str]:
+    parts: list[str] = []
+    for ne in element.get("elements", []):
+        parts.extend(_extract_element_content(ne))
+    return parts
+
+
+def _extract_column_set(element: dict) -> list[str]:
+    parts: list[str] = []
+    for col in element.get("columns", []):
+        for ce in col.get("elements", []):
+            parts.extend(_extract_element_content(ce))
+    return parts
+
+
+_ELEMENT_HANDLERS: dict[str, Any] = {
+    "markdown": _extract_markdown,
+    "lark_md": _extract_markdown,
+    "div": _extract_div,
+    "a": _extract_link,
+    "button": _extract_button,
+    "img": _extract_img,
+    "note": _extract_nested_elements,
+    "plain_text": _extract_markdown,
+    "column_set": _extract_column_set,
+}
+
+
 def _extract_element_content(element: dict) -> list[str]:
     """Extract content from a single card element."""
-    parts = []
-
     if not isinstance(element, dict):
-        return parts
-
+        return []
     tag = element.get("tag", "")
+    handler = _ELEMENT_HANDLERS.get(tag, _extract_nested_elements)
+    return handler(element)
 
-    if tag in ("markdown", "lark_md"):
-        content = element.get("content", "")
-        if content:
-            parts.append(content)
 
-    elif tag == "div":
-        text = element.get("text", {})
-        if isinstance(text, dict):
-            text_content = text.get("content", "") or text.get("text", "")
-            if text_content:
-                parts.append(text_content)
-        elif isinstance(text, str):
-            parts.append(text)
-        for field in element.get("fields", []):
-            if isinstance(field, dict):
-                field_text = field.get("text", {})
-                if isinstance(field_text, dict):
-                    c = field_text.get("content", "")
-                    if c:
-                        parts.append(c)
+def _parse_post_block(block: dict) -> tuple[str | None, list[str]]:
+    """Parse a single post block into (text, image_keys)."""
+    if not isinstance(block, dict) or not isinstance(block.get("content"), list):
+        return None, []
+    texts: list[str] = []
+    images: list[str] = []
+    if title := block.get("title"):
+        texts.append(title)
+    for row in block["content"]:
+        if not isinstance(row, list):
+            continue
+        for el in row:
+            if not isinstance(el, dict):
+                continue
+            tag = el.get("tag")
+            if tag in ("text", "a"):
+                texts.append(el.get("text", ""))
+            elif tag == "at":
+                texts.append(f"@{el.get('user_name', 'user')}")
+            elif tag == "img" and (key := el.get("image_key")):
+                images.append(key)
+    return (" ".join(texts).strip() or None), images
 
-    elif tag == "a":
-        href = element.get("href", "")
-        text = element.get("text", "")
-        if href:
-            parts.append(f"link: {href}")
-        if text:
-            parts.append(text)
 
-    elif tag == "button":
-        text = element.get("text", {})
-        if isinstance(text, dict):
-            c = text.get("content", "")
-            if c:
-                parts.append(c)
-        url = element.get("url", "") or element.get("multi_url", {}).get("url", "")
-        if url:
-            parts.append(f"link: {url}")
+def _find_post_block(root: dict) -> tuple[str, list[str]]:
+    """Search for a valid post block in direct, localized, or fallback format."""
+    # Direct format
+    if "content" in root:
+        text, imgs = _parse_post_block(root)
+        if text or imgs:
+            return text or "", imgs
 
-    elif tag == "img":
-        alt = element.get("alt", {})
-        parts.append(alt.get("content", "[image]") if isinstance(alt, dict) else "[image]")
+    # Localized: prefer known locales, then fall back to any dict child
+    for key in ("zh_cn", "en_us", "ja_jp"):
+        if key in root:
+            text, imgs = _parse_post_block(root[key])
+            if text or imgs:
+                return text or "", imgs
+    for val in root.values():
+        if isinstance(val, dict):
+            text, imgs = _parse_post_block(val)
+            if text or imgs:
+                return text or "", imgs
 
-    elif tag == "note":
-        for ne in element.get("elements", []):
-            parts.extend(_extract_element_content(ne))
-
-    elif tag == "column_set":
-        for col in element.get("columns", []):
-            for ce in col.get("elements", []):
-                parts.extend(_extract_element_content(ce))
-
-    elif tag == "plain_text":
-        content = element.get("content", "")
-        if content:
-            parts.append(content)
-
-    else:
-        for ne in element.get("elements", []):
-            parts.extend(_extract_element_content(ne))
-
-    return parts
+    return "", []
 
 
 def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
@@ -172,54 +236,12 @@ def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
     - Localized: {"zh_cn": {"title": "...", "content": [...]}}
     - Wrapped:   {"post": {"zh_cn": {"title": "...", "content": [...]}}}
     """
-
-    def _parse_block(block: dict) -> tuple[str | None, list[str]]:
-        if not isinstance(block, dict) or not isinstance(block.get("content"), list):
-            return None, []
-        texts, images = [], []
-        if title := block.get("title"):
-            texts.append(title)
-        for row in block["content"]:
-            if not isinstance(row, list):
-                continue
-            for el in row:
-                if not isinstance(el, dict):
-                    continue
-                tag = el.get("tag")
-                if tag in ("text", "a"):
-                    texts.append(el.get("text", ""))
-                elif tag == "at":
-                    texts.append(f"@{el.get('user_name', 'user')}")
-                elif tag == "img" and (key := el.get("image_key")):
-                    images.append(key)
-        return (" ".join(texts).strip() or None), images
-
-    # Unwrap optional {"post": ...} envelope
     root = content_json
     if isinstance(root, dict) and isinstance(root.get("post"), dict):
         root = root["post"]
     if not isinstance(root, dict):
         return "", []
-
-    # Direct format
-    if "content" in root:
-        text, imgs = _parse_block(root)
-        if text or imgs:
-            return text or "", imgs
-
-    # Localized: prefer known locales, then fall back to any dict child
-    for key in ("zh_cn", "en_us", "ja_jp"):
-        if key in root:
-            text, imgs = _parse_block(root[key])
-            if text or imgs:
-                return text or "", imgs
-    for val in root.values():
-        if isinstance(val, dict):
-            text, imgs = _parse_block(val)
-            if text or imgs:
-                return text or "", imgs
-
-    return "", []
+    return _find_post_block(root)
 
 
 def _extract_post_text(content_json: dict) -> str:
