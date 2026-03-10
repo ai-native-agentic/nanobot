@@ -258,54 +258,70 @@ async def _iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], 
         buffer.append(line)
 
 
+def _handle_output_item_added(event: dict[str, Any], buffers: dict[str, dict[str, Any]]) -> None:
+    """Register a new function_call tool buffer when an output item is added."""
+    item = event.get("item") or {}
+    if item.get("type") != "function_call":
+        return
+    call_id = item.get("call_id")
+    if not call_id:
+        return
+    buffers[call_id] = {
+        "id": item.get("id") or "fc_0",
+        "name": item.get("name"),
+        "arguments": item.get("arguments") or "",
+    }
+
+
+def _handle_output_item_done(
+    event: dict[str, Any],
+    buffers: dict[str, dict[str, Any]],
+    tool_calls: list[ToolCallRequest],
+) -> None:
+    """Finalize a function_call tool buffer into a ToolCallRequest."""
+    item = event.get("item") or {}
+    if item.get("type") != "function_call":
+        return
+    call_id = item.get("call_id")
+    if not call_id:
+        return
+    buf = buffers.get(call_id) or {}
+    args_raw = buf.get("arguments") or item.get("arguments") or "{}"
+    try:
+        args = json.loads(args_raw)
+    except Exception:
+        args = {"raw": args_raw}
+    tool_calls.append(
+        ToolCallRequest(
+            id=f"{call_id}|{buf.get('id') or item.get('id') or 'fc_0'}",
+            name=buf.get("name") or item.get("name"),
+            arguments=args,
+        )
+    )
+
+
 async def _consume_sse(response: httpx.Response) -> tuple[str, list[ToolCallRequest], str]:
     content = ""
     tool_calls: list[ToolCallRequest] = []
-    tool_call_buffers: dict[str, dict[str, Any]] = {}
+    buffers: dict[str, dict[str, Any]] = {}
     finish_reason = "stop"
 
     async for event in _iter_sse(response):
         event_type = event.get("type")
         if event_type == "response.output_item.added":
-            item = event.get("item") or {}
-            if item.get("type") == "function_call":
-                call_id = item.get("call_id")
-                if not call_id:
-                    continue
-                tool_call_buffers[call_id] = {
-                    "id": item.get("id") or "fc_0",
-                    "name": item.get("name"),
-                    "arguments": item.get("arguments") or "",
-                }
+            _handle_output_item_added(event, buffers)
         elif event_type == "response.output_text.delta":
             content += event.get("delta") or ""
         elif event_type == "response.function_call_arguments.delta":
             call_id = event.get("call_id")
-            if call_id and call_id in tool_call_buffers:
-                tool_call_buffers[call_id]["arguments"] += event.get("delta") or ""
+            if call_id and call_id in buffers:
+                buffers[call_id]["arguments"] += event.get("delta") or ""
         elif event_type == "response.function_call_arguments.done":
             call_id = event.get("call_id")
-            if call_id and call_id in tool_call_buffers:
-                tool_call_buffers[call_id]["arguments"] = event.get("arguments") or ""
+            if call_id and call_id in buffers:
+                buffers[call_id]["arguments"] = event.get("arguments") or ""
         elif event_type == "response.output_item.done":
-            item = event.get("item") or {}
-            if item.get("type") == "function_call":
-                call_id = item.get("call_id")
-                if not call_id:
-                    continue
-                buf = tool_call_buffers.get(call_id) or {}
-                args_raw = buf.get("arguments") or item.get("arguments") or "{}"
-                try:
-                    args = json.loads(args_raw)
-                except Exception:
-                    args = {"raw": args_raw}
-                tool_calls.append(
-                    ToolCallRequest(
-                        id=f"{call_id}|{buf.get('id') or item.get('id') or 'fc_0'}",
-                        name=buf.get("name") or item.get("name"),
-                        arguments=args,
-                    )
-                )
+            _handle_output_item_done(event, buffers, tool_calls)
         elif event_type == "response.completed":
             status = (event.get("response") or {}).get("status")
             finish_reason = _map_finish_reason(status)
