@@ -4,15 +4,17 @@ from types import SimpleNamespace
 
 import pytest
 
-import nanobot.channels.matrix as matrix_module
-from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.channels.matrix import (
+nio = pytest.importorskip("nio", reason="matrix-nio not installed (install with: pip install nanobot-ai[matrix])")
+
+import nanobot.channels.matrix as matrix_module  # noqa: E402
+from nanobot.bus.events import OutboundMessage  # noqa: E402
+from nanobot.bus.queue import MessageBus  # noqa: E402
+from nanobot.channels.matrix import (  # noqa: E402
     MATRIX_HTML_FORMAT,
     TYPING_NOTICE_TIMEOUT_MS,
     MatrixChannel,
 )
-from nanobot.config.schema import MatrixConfig
+from nanobot.config.schema import MatrixConfig  # noqa: E402
 
 _ROOM_SEND_UNSET = object()
 
