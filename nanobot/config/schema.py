@@ -199,6 +199,15 @@ class QQConfig(Base):
     )  # Allowed user openids (empty = public access)
 
 
+class SeedbotConfig(Base):
+    """Seedbot subprocess channel configuration."""
+
+    enabled: bool = False
+    script_path: str = ""  # Path to seedbot main.sh script
+    working_dir: str = ""  # Working directory for the subprocess (optional)
+    allow_from: list[str] = Field(default_factory=list)
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -214,6 +223,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    seedbot: SeedbotConfig = Field(default_factory=SeedbotConfig)
 
 
 class AgentDefaults(Base):

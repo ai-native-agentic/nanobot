@@ -147,6 +147,16 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
 
+        # Seedbot channel
+        if self.config.channels.seedbot.enabled:
+            try:
+                from nanobot.channels.seedbot import SeedbotChannel
+
+                self.channels["seedbot"] = SeedbotChannel(self.config.channels.seedbot, self.bus)
+                logger.info("Seedbot channel enabled")
+            except ImportError as e:
+                logger.warning("Seedbot channel not available: {}", e)
+
         self._validate_allow_from()
 
     def _validate_allow_from(self) -> None:
