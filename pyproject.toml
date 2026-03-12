@@ -106,6 +106,8 @@ ignore = ["E501"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
+[tool.coverage.run]
+source = ["nanobot"]
 
 [tool.black]
 line-length = 100
