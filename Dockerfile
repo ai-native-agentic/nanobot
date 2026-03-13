@@ -33,8 +33,16 @@ WORKDIR /app
 # Create config directory
 RUN mkdir -p /root/.nanobot
 
+# Create non-root user
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+
+# Change ownership of app directory
+RUN chown -R appuser:appgroup /app
+
 # Gateway default port
 EXPOSE 18790
+
+USER appuser
 
 ENTRYPOINT ["nanobot"]
 CMD ["status"]
