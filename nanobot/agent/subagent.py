@@ -247,15 +247,20 @@ Stay focused on the assigned task. Your final response will be reported back to 
 
     async def cancel_by_session(self, session_key: str) -> int:
         """Cancel all subagents for the given session. Returns count cancelled."""
+        task_ids = self._session_tasks.get(session_key, set())
         tasks = [
             self._running_tasks[tid]
-            for tid in self._session_tasks.get(session_key, [])
+            for tid in task_ids
             if tid in self._running_tasks and not self._running_tasks[tid].done()
         ]
         for t in tasks:
             t.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+            # Remove cancelled tasks from tracking
+            for tid in task_ids:
+                self._running_tasks.pop(tid, None)
+            self._session_tasks.pop(session_key, None)
         return len(tasks)
 
     def get_running_count(self) -> int:
