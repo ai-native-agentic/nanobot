@@ -65,8 +65,6 @@ def test_provider_availability():
         print("❌ LiteLLM not installed")
 
     try:
-        from nanobot.cli.commands import app
-
         print("✅ CLI Commands Available")
     except Exception as e:
         print(f"❌ CLI not available: {e}")
@@ -82,7 +80,7 @@ def test_provider_availability():
         print(f"   {len(available)} providers ready for use")
     elif len(available) > 0:
         print("⚠️  PARTIAL: Some providers integrated")
-        print(f"   {len(available)} providers available, {len(unavailable)} missing")
+        print(f"   {len(available)} providers available, {len(providers) - len(available)} missing")
     else:
         print("❌ FAILED: No providers integrated")
 

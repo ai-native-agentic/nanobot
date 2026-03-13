@@ -131,7 +131,11 @@ class WebFetchTool(Tool):
         self.proxy = proxy
 
     async def execute(
-        self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any
+        self,
+        url: str,
+        extractMode: str = "markdown",  # noqa: N803
+        maxChars: int | None = None,  # noqa: N803
+        **kwargs: Any,
     ) -> str:
         from readability import Document
 
@@ -203,7 +207,7 @@ class WebFetchTool(Tool):
         )
         text = re.sub(
             r"<h([1-6])[^>]*>([\s\S]*?)</h\1>",
-            lambda m: f'\n{"#" * int(m[1])} {_strip_tags(m[2])}\n',
+            lambda m: f"\n{'#' * int(m[1])} {_strip_tags(m[2])}\n",
             text,
             flags=re.I,
         )
