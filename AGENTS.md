@@ -12,23 +12,31 @@ Stack: Python 3.11+, MCP, asyncio, SSE streaming
 
 ## STRUCTURE
 
-```
-.
-├── nanobot/                 # Main package
-│   ├── agent/               # Core agent loop + subagent support
-│   │   ├── loop.py          # Main agent execution loop
-│   │   └── subagent.py      # Subagent delegation
-│   ├── providers/           # LLM providers (OpenAI, Azure, LiteLLM, Codex)
-│   ├── session/             # Session + history management
-│   ├── config/              # Schema, loader, paths
-│   ├── bus/                 # Event queue + message bus
-│   ├── cron/                # Scheduled task service
-│   ├── cli/                 # CLI commands
-│   └── templates/           # Workspace templates (memory, etc.)
-├── channels/                # Multi-channel adapters (Telegram, Slack, etc.)
-├── tests/                   # Unit + integration tests
-└── core_agent_lines.sh      # Line count verification script
-```
+nanobot/
+├── bridge/
+│   ├── src/
+│   └── package.json
+├── case/
+├── docs/
+│   └── chunks/
+├── nanobot/
+│   ├── agent/
+│   ├── bus/
+│   ├── channels/
+│   ├── cli/
+│   ├── config/
+│   ├── cron/
+│   ├── heartbeat/
+│   ├── providers/
+│   ├── session/
+│   ├── skills/
+│   ├── templates/
+│   ├── utils/
+├── scripts/
+├── tests/
+├── AGENTS.md
+├── README.md
+├── pyproject.toml
 
 ## WHERE TO LOOK
 
@@ -117,20 +125,11 @@ mcp_servers:
 ## COMMANDS
 
 ```bash
-# Install
-pip install nanobot-ai
-
-# Start agent
-nanobot start
-
-# Verify line count discipline
-bash core_agent_lines.sh
-
-# Run tests
-pytest tests/
-
-# Create workspace from template
-nanobot workspace create --template memory
+hatch run ...                          # Run hatch commands
+hatch build                            # Build package
+hatch test                             # Run tests
+pip install -e .                           # Install in editable mode
+python -m pytest                           # Run tests
 ```
 
 ## HARNESS STATUS
