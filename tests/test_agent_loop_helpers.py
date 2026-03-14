@@ -1,6 +1,5 @@
 """Tests for AgentLoop helper methods."""
 
-import pytest
 from nanobot.agent.loop import AgentLoop
 
 

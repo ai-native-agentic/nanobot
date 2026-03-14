@@ -1,13 +1,11 @@
 """Tests for SubagentManager."""
 
 import asyncio
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.agent.subagent import SubagentManager
-from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 
 
